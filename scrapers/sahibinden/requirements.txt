@@ -1,0 +1,6 @@
+pandas
+openpyxl
+undetected-chromedriver
+selenium
+geopy
+    
