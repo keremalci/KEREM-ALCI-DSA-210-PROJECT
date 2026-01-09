@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project specific
+*.pkl
+analysis/ml_analysis.py
+test_results.py
+main_pipeline.py
+scrapers/sahibinden/scraper_sahibinden.py

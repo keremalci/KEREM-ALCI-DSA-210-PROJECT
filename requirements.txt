@@ -1,0 +1,21 @@
+# Core Data Processing & Analysis
+pandas
+numpy
+openpyxl
+scipy
+
+# Machine Learning & Model Analysis (ml_analysis.py)
+scikit-learn
+matplotlib
+seaborn
+
+# Web Scraping (scrapers/)
+requests
+selenium
+beautifulsoup4
+lxml
+playwright
+undetected-chromedriver
+
+# Geolocation Data (for enrichment)
+geopy
