@@ -104,11 +104,6 @@ jupyter notebook
 3.  **`analysis/ml_analysis.ipynb`**:
     *   The core Machine Learning logic for price prediction.
 
-### Running Scrapers
-
-Navigate to `scrapers/sahibinden/` and run the notebook:
-*   `scraper_sahibinden.ipynb`: Ultra-safe scraper for Sahibinden.com.
-
 ## Key Findings
 
 See [FINAL_REPORT.md](FINAL_REPORT.md) for detailed findings.
