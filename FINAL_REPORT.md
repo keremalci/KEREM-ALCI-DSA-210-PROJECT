@@ -1,9 +1,10 @@
 # DSA-210 Project: Kurtkoy Rental Price Analysis
 
 > **Revised report.** See `CHANGELOG.md` for the full list of code fixes
-> this revision is based on. Numbers below come from the corrected
-> pipeline run against the real 47-listing dataset (16 Sahibinden, 19
-> Emlakjet, 12 Hepsiemlak).
+> and data-quality work this revision is based on. Numbers below come from
+> the corrected pipeline run against the expanded, real 216-listing dataset
+> (35 Emlakjet, 157 Sahibinden, 24 Hepsiemlak - see Section 5 for exactly
+> where this data came from).
 
 ## 1. Project Overview
 This project analyzes the rental market in Kurtkoy to help **Sabanci
@@ -17,69 +18,74 @@ predicted value.
 
 ## 2. Key Market Insights (Bonferroni-corrected)
 
-Six hypothesis tests were run as one family (alpha = 0.05/6 = 0.0083 after
-correction, since testing many hypotheses on 47 rows raises the chance of
-a false positive):
+Seven hypothesis tests were run as one family (alpha = 0.05/7 = 0.0071
+after correction, since testing several hypotheses on one dataset raises
+the chance of a false positive):
 
-| Finding | Statistic | p-value | Robust after correction? |
-|---|---|---|---|
-| **Size drives price** - Area vs Price | Pearson r = **0.431** | 0.0025 | **Yes** |
-| Bathrooms vs Price | ANOVA F = 4.16 | 0.0498 | **No** - looked significant at raw alpha=0.05, but fails the corrected threshold. Treat as a weak/unproven signal, not an established driver. |
-| Building Age vs Price | ANOVA F = 0.39 | 0.763 | No relationship detected |
-| Furnished vs Unfurnished | Welch t = -0.70 | 0.490 | No relationship detected |
-| Distance to Metro vs Price | Pearson r = -0.161 | 0.414 | No relationship detected |
-| Distance to University vs Price | Pearson r = -0.229 | 0.240 | No relationship detected |
-| Agent vs Owner | - | - | Untestable: 15 Agent vs. 1 Owner listing in the data |
+| Finding | n | Statistic | p-value | Robust after correction? |
+|---|---|---|---|---|
+| **Size drives price** - Area vs Price | 216 | Pearson r = **0.500** | <0.00001 | **Yes** |
+| **Bathrooms matter** - Bathrooms vs Price | 51 | ANOVA F = 13.84 | 0.00052 | **Yes** |
+| Building Age vs Price | 15 | ANOVA F = 0.39 | 0.763 | No relationship detected |
+| Agent vs Owner | 32 | Welch t = -0.19 | 0.854 | No relationship detected |
+| Furnished vs Unfurnished | 71 | Welch t = 0.56 | 0.578 | No relationship detected |
+| Distance to Metro vs Price | 40 | Pearson r = -0.270 | 0.092 | No relationship detected |
+| Distance to University vs Price | 40 | Pearson r = -0.127 | 0.433 | No relationship detected |
 
-**Size is the one statistically robust driver of price** in this dataset.
-The "location doesn't matter much" finding from the original report holds
-up, and now rests on a larger sample: Sahibinden (16 rows) **and**
-Hepsiemlak (12 rows) both have real distance data (Emlakjet's raw data
-never includes it), so this conclusion is drawn from 28 listings, not 16.
+**Size and bathroom count are the two statistically robust drivers of
+price** in this dataset. Both survive correction for testing multiple
+hypotheses, and both got *stronger*, not weaker, once the dataset grew
+from 47 to 216 listings - a good sign they're real market effects, not
+noise. Listings with 2 bathrooms average ₺43,900/month vs. ₺32,300 for 1
+bathroom.
 
-**Data completeness caveat:** Building Age and Listing Type are only
-populated by Sahibinden (Emlakjet and Hepsiemlak leave both blank), so
-those two tests are effectively Sahibinden-only comparisons on 15-16 rows -
-worth re-testing once more data with those fields is collected.
+**A data-quality note worth being transparent about:** on the first pass
+at the expanded 218-row dataset, the Area-vs-Price correlation actually
+*flipped* to non-significant (r=0.08, p=0.23). The cause: two Emlakjet
+listings had a scraped `Area(m2)` of 770 for 1-2 room apartments - clearly
+a data error (confirmed by their price-per-m2 being ~10x below the market
+average, whereas a genuinely large expensive property's price scales with
+its size). Excluding just those 2 rows restored - and strengthened - the
+correlation. See `CHANGELOG.md` item 12 for the detection method. This is
+a useful reminder that a single-digit number of bad rows can meaningfully
+distort a small dataset's conclusions.
+
+**Data completeness caveat, unchanged from before:** Building Age is only
+populated by Sahibinden (Emlakjet and Hepsiemlak leave it blank), so that
+test is still effectively a Sahibinden-only comparison (n=15, all with
+real age data).
 
 ## 3. Student Housing Strategy
 
-Based on the corrected analysis, the practical advice from the original
-report largely still holds, with one hedge added:
-
-1. **Don't overpay for proximity.** Distance to metro/university/bus shows
-   no statistically meaningful relationship to price (now checked on 28
-   listings across two sources). Widening your search radius is unlikely
-   to cost you meaningfully more.
-2. **Prioritize price-per-square-meter.** Area is the one variable with a
-   confirmed, statistically robust relationship to price.
-3. **Check multiple platforms** - and watch for **cross-platform
-   duplicates**: this dataset had 2 pairs of listings (4 rows) that appear
-   to be the same unit posted on two different sites (matched by price,
-   area, and room count). Don't double-count them when comparing "typical"
-   prices across platforms.
-4. **Treat the "bathrooms matter" and "older buildings are cheaper"
-   findings as unproven**, not established, given this sample size -
-   neither survives correction for multiple testing.
+1. **Prioritize price-per-square-meter and bathroom count.** These are the
+   two variables with confirmed, statistically robust relationships to
+   price in this dataset.
+2. **Don't overpay for proximity.** Distance to metro/university/bus still
+   shows no statistically meaningful relationship to price, now checked on
+   40 listings across two sources (Sahibinden + Hepsiemlak; Emlakjet's raw
+   data never includes distance fields).
+3. **Check multiple platforms** - but treat "this exact price+area+room
+   combo shows up on two sites" with caution rather than as confirmed
+   duplication. At this dataset's size, common apartment sizes and round
+   pricing make coincidental matches common - see `CHANGELOG.md` item 13.
+4. **Building Age and Furnishing show no proven price effect** in this
+   data - don't pay a premium (or expect a discount) based on either.
 
 ## 4. "Deal Finder" Results
 
-The ML pipeline (Random Forest, selected automatically via cross-validated
-comparison against Linear Regression, Decision Tree, and a leaner/fuller
-feature-set comparison - see `CHANGELOG.md` item 5) flags listings whose
-predicted fair price meaningfully exceeds their actual asking price, using
-**out-of-fold predictions only** (no listing's own data is used to predict
-its own price).
+The ML pipeline compares Linear Regression, Decision Tree, and Random
+Forest on two feature sets (lean vs. extended) via 5-fold cross-validation,
+and flags listings whose predicted fair price meaningfully exceeds their
+actual asking price, using **out-of-fold predictions only** (no listing's
+own data is used to predict its own price).
 
-**Honest performance:** cross-validated R2 = **0.228** (Random Forest,
-lean feature set: Area, Rooms, Bathrooms, Furnishing). This is
-meaningfully lower than the original report's R2=0.44 - because that
-number came from a Linear Regression fit that leaked training rows into
-its own predictions. Re-checked honestly (out-of-fold), the *original*
-feature set scores **below zero** R2 - worse than guessing the mean price.
-0.228 means the current model explains roughly a fifth of price variation
-out of sample: useful for flagging listings worth a second look, not a
-precise valuation.
+**Honest performance:** cross-validated R2 = **0.250** (Linear Regression,
+lean feature set: Area, Rooms, Bathrooms, Furnishing) - the simplest model
+now wins, and every model's fold-to-fold variance roughly halved compared
+to the original 47-row run, meaning this estimate is meaningfully more
+stable than before, not just a different number by chance. 0.25 means the
+model explains about a quarter of price variation out of sample: useful
+for flagging listings worth a second look, still not a precise valuation.
 
 > Full deal list (with area, rooms, bathrooms, furnishing, and duplicate
 > flags) available in `data/outputs/ml_analysis_results.xlsx`.
@@ -89,23 +95,29 @@ precise valuation.
 ### Data Pipeline
 - **Ingestion**: `scrapers/` - per-platform scrapers with conservative
   delays.
-- **Cleaning**: `analysis/data_cleaning.py` is now the single shared
-  source of truth for parsing all three sources' inconsistent formats
-  (see `CHANGELOG.md` items 1, 8).
+- **Cleaning**: `analysis/data_cleaning.py` is the single shared source of
+  truth for parsing all sources' inconsistent formats.
+- **Data sources**: `data_cleaning.SOURCE_FILES` merges every usable raw
+  scrape batch per source (not just one file each) - a 141-row Sahibinden
+  backup batch, an 18-listing Emlakjet batch, and a 12-listing Hepsiemlak
+  batch were previously sitting unused. See `CHANGELOG.md` item 11 for the
+  full accounting of which files were included/excluded and why.
+- **Data quality**: `flag_data_errors()` excludes listings with an
+  implausible price-per-m2 (Tukey's fences on the ratio); `flag_
+  duplicates()` flags possible cross-platform duplicates for manual review
+  without auto-excluding them (see item 13).
 - **Limitation, stated explicitly**: Emlakjet never provides distance or
   Building Age/Listing Type data; Hepsiemlak never provides Bathrooms or
   Building Age/Listing Type. Only Sahibinden has all fields populated.
 
 ### Modeling
 - **Evaluation**: 5-fold cross-validation (`KFold` + `cross_val_score` /
-  `cross_val_predict`), not a single train/test split - the sample is too
-  small (47 rows) for a single split to be a reliable estimate.
+  `cross_val_predict`), not a single train/test split.
 - **Models compared**: Linear Regression, Decision Tree, Random Forest,
   each on two feature sets (lean vs. extended), 6 combinations total. Best
   combination selected by mean cross-validated R2.
-- **Clustering**: PCA + K-Means still segments the market into
-  Budget/Mid-range/Luxury tiers, now built on the corrected feature
-  cleaning.
+- **Clustering**: PCA + K-Means segments the market into Budget/Mid-range/
+  Luxury tiers.
 
 ### Repository Structure
 ```plaintext
@@ -113,7 +125,7 @@ DSA210Project/
 ├── main_pipeline.py / .ipynb   # Single entry point: runs test_results.py then ml_analysis.py
 ├── test_results.py / .ipynb    # Hypothesis testing (Bonferroni-corrected)
 ├── analysis/
-│   ├── data_cleaning.py        # Shared cleaners - single source of truth
+│   ├── data_cleaning.py        # Shared cleaners + multi-file loading - single source of truth
 │   ├── ml_analysis.py / .ipynb # ML training, CV, Deal Finder
 │   └── ANALYSIS_SUMMARY.md
 ├── data/                        # raw/, outputs/
@@ -125,11 +137,13 @@ DSA210Project/
 
 ## 6. Recommendation for Future Work
 
-With only 47 listings, several findings (bathrooms, building age,
-duplicated model comparisons) are underpowered. The single highest-value
-next step is **more data** - particularly Emlakjet listings with distance
-data and Building Age/Listing Type coverage from Emlakjet and Hepsiemlak,
-which are currently the two biggest data gaps. A scheduled scrape (e.g.
-weekly, respecting the existing rate limits) would both grow the sample
-and let price-over-time trends be studied, which this snapshot-based
-design can't currently do.
+The biggest remaining data gaps are Emlakjet distance data and Building
+Age/Listing Type coverage for Emlakjet and Hepsiemlak - none of the extra
+batches found this round filled those in. A scheduled scrape (e.g. weekly,
+respecting the existing rate limits) would grow the sample further and
+also let price-over-time trends be studied, which this snapshot-based
+design can't currently do. Given how much two bad data points affected the
+headline finding at n=218, it's also worth adding a lightweight sanity
+check (e.g. the price-per-m2 outlier check now in `data_cleaning.py`) as a
+standard step in the scrapers themselves, so errors get caught closer to
+collection time.

@@ -1,10 +1,12 @@
 # Changelog - Fixes applied to the DSA210 Kurtkoy Rental Project
 
 All items below were validated by running the actual code against the real
-`sahibinden_enriched_listings.xlsx`, `emlakjet_listings.xlsx`, and
-`hepsiemlak_listings.xlsx` files (47 listings total: 16 Sahibinden, 19
-Emlakjet, 12 Hepsiemlak). Numbers quoted here are real outputs, not
-estimates.
+raw data files. **Round 1** (items 1-10) was validated against the three
+originally-referenced files (47 listings: 16 Sahibinden, 19 Emlakjet, 12
+Hepsiemlak). **Round 2** (items 11-14) expanded this to every usable raw
+file found in `data/raw/` (218 listings, 216 after excluding 2 confirmed
+data errors) - see item 11 for exactly which files and why. Numbers quoted
+throughout are real outputs, not estimates.
 
 **Note on how this was tested:** validation was done in a sandbox with no
 internet access (couldn't `pip install scipy`/`scikit-learn` there), so the
@@ -182,6 +184,104 @@ factor in the improved out-of-fold performance above.
 **After:** `2_Best_Deals_Finder` now also includes Area, Total Rooms,
 Bathrooms, Furnishing, Building Age, and the duplicate-group flag, so a
 reader can sanity-check a flagged "deal" without opening every URL.
+
+---
+
+## 11. Round 2: the dataset was quietly 4.6x bigger than what was being used
+
+While reviewing `data/raw/`, several extra scrape batches turned out to be
+sitting unused next to the three "canonical" files referenced above:
+
+- `data/raw/sahibinden/sahibinden_local_listings_backup.xlsx` - **141 rows**,
+  zero URL overlap with the 16-row canonical Sahibinden file, zero missing
+  values in any column.
+- `data/raw/emlakjet/emlakjet_listings_enriched.xlsx` - 19 rows, 18 of which
+  are new URLs not in the canonical 19-row Emlakjet file.
+- `data/raw/hepsiemlak/hepsiemlak_listings_new_20251230.xlsx` - 17 rows, 12
+  of which are new URLs not in the canonical 12-row Hepsiemlak file.
+
+(Two other extra files were checked and confirmed NOT worth including:
+`emlakjet_listings_20251230_225742.xlsx` is a strict column-subset of
+`emlakjet_listings_enriched.xlsx` with the same rows; `emlakjet_listings_
+with_coordinates.xlsx` has the same 19 rows as canonical with 100%-empty
+lat/long columns - a geocoding attempt that never completed.)
+
+`data_cleaning.SOURCE_FILES` now lists every worthwhile file per source
+(most-complete-first), and `load_all_sources()` merges them, deduplicating
+by `Listing URL` within each source. **Total dataset: 47 -> 218 listings**
+(37 Emlakjet, 157 Sahibinden, 24 Hepsiemlak).
+
+Merging in the backup batch also surfaced a `Furnishment` bug: it uses
+`'Yes (Inferred)'` / `'No (Inferred)'` values that the existing
+`clean_furnish()` didn't recognize (exact-string matching only) and would
+have silently mapped to `'Unknown'`. Fixed with a `.startswith('yes'/'no')`
+check (affects 10/141 rows).
+
+## 12. New: a genuine data error in the expanded dataset, found and fixed
+
+Two Emlakjet listings show `Area(m2): 770` for 1-2 room apartments -
+physically implausible, and confirmed as a data error (not just a large
+unit) by their price-per-m2: ~30 TL/m2 against a market average of
+~330-400 TL/m2 (a legitimately large, expensive property's price scales
+with its size and wouldn't show this). `data_cleaning.flag_data_errors()`
+uses Tukey's fences (k=2.0) on the price/area ratio to catch exactly these
+2 rows without flagging genuinely large-but-fairly-priced listings (e.g. a
+240m2/47,000 TL Sahibinden listing at 196 TL/m2 is NOT flagged). These 2
+rows are excluded from both `test_results.py` and `ml_analysis.py`.
+
+**Why this mattered:** before excluding them, "Price vs Area" - the
+project's headline finding - actually flipped to non-significant on the
+218-row dataset (r=0.081, p=0.23). With just those 2 corrupted rows
+removed, it comes back even stronger than before: **r=0.500, p<0.00001**
+on 216 rows. Two bad data points were enough to erase the correlation on a
+dataset this size - a good demonstration of why outlier checking matters,
+not just bug-fixing.
+
+## 13. Duplicate-flag policy changed: flag, but no longer auto-exclude
+
+Round 1 (#8, 47 rows) found exactly 2 duplicate pairs and excluded them
+from training. Re-tested on 218 rows, even an **exact, unrounded** match on
+price+area+rooms across sources hits 39 rows in 17 groups - Kurtkoy rentals
+cluster heavily around common sizes and round prices (25000, 30000, ...),
+so this signal is far weaker at this scale than it looked on 47 rows. There
+is no reliable way to tell a true cross-posted duplicate from a
+coincidentally similar independent listing without an address or exact
+coordinates, which this dataset doesn't have for most rows.
+`ml_analysis.py` no longer drops these rows from training (auto-excluding
+~20% of the data on a shaky heuristic would do more harm than good); the
+`Likely_Duplicate_Group` flag is kept in the exported Excel for manual
+review instead.
+
+## 14. Final numbers on the expanded (216-row) dataset
+
+Hypothesis tests (7 tests now that Listing Type has enough data to run;
+Bonferroni alpha = 0.05/7 = 0.00714):
+
+| Test | n | Statistic | p-value | Verdict |
+|---|---|---|---|---|
+| **Price vs Area** | 216 | r=0.500 | <0.00001 | **Reject H0 - robust** |
+| **Price vs Bathrooms** | 51 | F=13.84 | 0.00052 | **Reject H0 - robust** (was borderline/failed in Round 1) |
+| Price vs Building Age | 15 | F=0.390 | 0.763 | Fail (still Sahibinden-only, unchanged) |
+| Price vs Listing Type | 32 | t=-0.185 | 0.854 | Fail (now testable, still no effect) |
+| Price vs Furnishment | 71 | t=0.561 | 0.578 | Fail |
+| Price vs Dist. to Metro | 40 | r=-0.270 | 0.092 | Fail |
+| Price vs Dist. to University | 40 | r=-0.127 | 0.433 | Fail |
+
+ML model comparison (5-fold CV, `TransformedTargetRegressor(log)`):
+
+| Feature set | Model | CV R2 (mean +/- std) |
+|---|---|---|
+| **lean** | **Linear Regression** | **+0.250 +/- 0.109** |
+| lean | Random Forest | +0.200 +/- 0.118 |
+| extended | Linear Regression | +0.205 +/- 0.136 |
+| extended | Random Forest | +0.199 +/- 0.118 |
+| lean | Decision Tree | +0.138 +/- 0.090 |
+| extended | Decision Tree | +0.129 +/- 0.075 |
+
+Notably: with more data, the simplest model (Linear Regression) now wins,
+and every model's fold-to-fold variance dropped by roughly half compared
+to the 47-row results - a sign the larger dataset gives genuinely more
+stable estimates, not just a different winner by chance.
 
 ---
 

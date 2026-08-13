@@ -35,39 +35,92 @@ import numpy as np
 import pandas as pd
 
 # ---------------------------------------------------------------------------
-# Reference source files (relative to project root)
+# Reference source files (relative to project root).
+#
+# Each source can have MULTIPLE files - several extra scrape batches were
+# sitting unused in data/raw/ (e.g. a 141-row Sahibinden backup with zero
+# overlap with the original 16-row file, and a partial 18-listing Emlakjet
+# batch). Files are listed most-complete-first: when the same Listing URL
+# appears in more than one file for a source, the row from the first file
+# in the list wins (see `_dedupe_by_url`).
+#
+# Deliberately EXCLUDED (checked and confirmed not worth including):
+#   - emlakjet_listings_20251230_225742.xlsx: same 19 URLs as
+#     emlakjet_listings_enriched.xlsx but with 2 fewer columns - a
+#     strict subset, adds nothing.
+#   - emlakjet_listings_with_coordinates.xlsx: same 19 URLs as the
+#     canonical file; its lat/long/distance columns are 100% NaN (the
+#     geocoding attempt never completed) - adds nothing.
+#   - sahibinden_local_listings.xlsx: identical URL set to
+#     sahibinden_enriched_listings.xlsx - a duplicate, not new data.
 # ---------------------------------------------------------------------------
 SOURCE_FILES = {
-    "Emlakjet": "data/raw/emlakjet/emlakjet_listings.xlsx",
-    "Sahibinden": "data/raw/sahibinden/sahibinden_enriched_listings.xlsx",
-    "Hepsiemlak": "data/raw/hepsiemlak/hepsiemlak_listings.xlsx",
+    "Emlakjet": [
+        "data/raw/emlakjet/emlakjet_listings.xlsx",
+        "data/raw/emlakjet/emlakjet_listings_enriched.xlsx",
+    ],
+    "Sahibinden": [
+        "data/raw/sahibinden/sahibinden_enriched_listings.xlsx",
+        "data/raw/sahibinden/sahibinden_local_listings_backup.xlsx",
+    ],
+    "Hepsiemlak": [
+        "data/raw/hepsiemlak/hepsiemlak_listings.xlsx",
+        "data/raw/hepsiemlak/hepsiemlak_listings_new_20251230.xlsx",
+    ],
 }
 
 
-def load_all_sources(base_dir: str = ".") -> pd.DataFrame:
-    """Load all three raw files (if present), tag each row with its Source,
-    and concatenate them into a single DataFrame. Missing files are skipped
-    with a warning rather than raising, so the pipeline degrades gracefully.
-    """
-    frames = []
-    for source, rel_path in SOURCE_FILES.items():
-        path = os.path.join(base_dir, rel_path)
-        if not os.path.exists(path):
-            print(f"  [!] {source}: file not found at '{path}', skipping.")
-            continue
-        try:
-            df = pd.read_excel(path)
-        except Exception as exc:  # pragma: no cover - defensive
-            print(f"  [!] {source}: failed to read '{path}' ({exc}), skipping.")
-            continue
-        df["Source"] = source
-        frames.append(df)
-        print(f"  Loaded {len(df)} rows from {source} ({path})")
+def _dedupe_by_url(df: pd.DataFrame) -> pd.DataFrame:
+    """When the same Listing URL appears more than once (a listing present
+    in two files for the same source), keep the FIRST occurrence - callers
+    concatenate files in most-complete-first order, so this keeps the more
+    complete row rather than arbitrarily picking one."""
+    if "Listing URL" not in df.columns:
+        return df
+    before = len(df)
+    df = df.drop_duplicates(subset=["Listing URL"], keep="first")
+    n_dropped = before - len(df)
+    if n_dropped:
+        print(f"    (dropped {n_dropped} duplicate URL(s) also present in an earlier file)")
+    return df
 
-    if not frames:
+
+def load_all_sources(base_dir: str = ".") -> pd.DataFrame:
+    """Load every configured raw file (if present) per source, dedupe by
+    Listing URL within each source, tag rows with their Source, and
+    concatenate everything into a single DataFrame. Missing files are
+    skipped with a warning rather than raising, so the pipeline degrades
+    gracefully.
+    """
+    all_frames = []
+    for source, rel_paths in SOURCE_FILES.items():
+        source_frames = []
+        for rel_path in rel_paths:
+            path = os.path.join(base_dir, rel_path)
+            if not os.path.exists(path):
+                print(f"  [!] {source}: file not found at '{path}', skipping.")
+                continue
+            try:
+                df = pd.read_excel(path)
+            except Exception as exc:  # pragma: no cover - defensive
+                print(f"  [!] {source}: failed to read '{path}' ({exc}), skipping.")
+                continue
+            print(f"  Loaded {len(df)} rows from {source} ({path})")
+            source_frames.append(df)
+
+        if not source_frames:
+            continue
+
+        source_df = pd.concat(source_frames, ignore_index=True)
+        source_df = _dedupe_by_url(source_df)
+        source_df["Source"] = source
+        print(f"  -> {source} total after merging {len(rel_paths)} file(s): {len(source_df)} rows")
+        all_frames.append(source_df)
+
+    if not all_frames:
         raise FileNotFoundError("No raw data files could be loaded from data/raw/*")
 
-    return pd.concat(frames, ignore_index=True)
+    return pd.concat(all_frames, ignore_index=True)
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +249,8 @@ def clean_bathrooms(val):
 def clean_furnish(val):
     """Normalizes to 'Furnished' / 'Unfurnished' / 'Unknown'.
     Handles Python bools (Hepsiemlak), Turkish text (Sahibinden: Evet/Hayir),
-    and Emlakjet's Bos/Esyali wording.
+    Emlakjet's Bos/Esyali wording, and the Sahibinden backup batch's
+    'Yes (Inferred)' / 'No (Inferred)' / literal 'Unknown' values.
     """
     if pd.isna(val):
         return "Unknown"
@@ -204,9 +258,9 @@ def clean_furnish(val):
         return "Furnished" if val else "Unfurnished"
 
     s = str(val).strip().lower()
-    if s in ("true", "evet", "esyali", "eşyalı"):
+    if s in ("true", "evet", "esyali", "eşyalı") or s.startswith("yes"):
         return "Furnished"
-    if s in ("false", "hayir", "hayır", "bos", "boş"):
+    if s in ("false", "hayir", "hayır", "bos", "boş") or s.startswith("no"):
         return "Unfurnished"
     return "Unknown"
 
@@ -289,13 +343,20 @@ def clean_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def flag_duplicates(df: pd.DataFrame) -> pd.DataFrame:
-    """Flags likely duplicate listings posted across multiple platforms.
+    """Flags POSSIBLE duplicate listings posted across multiple platforms.
 
     Heuristic: same rounded price (nearest 500 TL), same rounded area
-    (nearest 5 m2), and same total room count. This isn't perfect (two
-    genuinely different units can coincidentally match), so we only FLAG
-    for review via a `Likely_Duplicate_Group` column rather than silently
-    dropping rows - dropping automatically on a 47-row dataset is risky.
+    (nearest 5 m2), and same total room count.
+
+    IMPORTANT CAVEAT: on the expanded ~218-row dataset, even an EXACT
+    (unrounded) match on price+area+rooms hits ~39 rows across ~17 groups.
+    Kurtkoy rentals cluster heavily around common sizes and round prices
+    (25000, 30000, ...), so a price/area/room match is only weak evidence
+    of true duplication - it is NOT reliable enough to auto-exclude rows
+    from training without a distinguishing signal (address, coordinates,
+    listing date) this dataset doesn't have. This function flags for
+    review/transparency only; callers should not drop these rows by
+    default.
     """
     out = df.copy()
     out["_price_bucket"] = (out["clean_price"] / 500).round() * 500
@@ -314,4 +375,29 @@ def flag_duplicates(df: pd.DataFrame) -> pd.DataFrame:
 
     out["Likely_Duplicate_Group"] = out.index.map(dup_group_id.get)
     out = out.drop(columns=["_price_bucket", "_area_bucket"])
+    return out
+
+
+def flag_data_errors(df: pd.DataFrame, k: float = 2.0) -> pd.DataFrame:
+    """Flags listings whose price-per-m2 is a statistical outlier (Tukey's
+    fences on the price/area ratio, k=2.0) - this catches genuine
+    scraping/data-entry errors (e.g. an Emlakjet 1+1 listing showing
+    "Area(m2)": 770, which would imply ~30 TL/m2 against a market average
+    of ~330-400 TL/m2) WITHOUT flagging large-but-legitimately-expensive
+    properties, since those scale sensibly in price and don't show up as
+    price/m2 outliers. Unlike `flag_duplicates`, this IS reliable enough to
+    exclude from training - a price/area ratio 10x off the rest of the
+    market is not a judgment call.
+    """
+    out = df.copy()
+    ratio = out["clean_price"] / out["clean_area"]
+    q1, q3 = ratio.quantile([0.25, 0.75])
+    iqr = q3 - q1
+    lo, hi = q1 - k * iqr, q3 + k * iqr
+    out["price_per_m2"] = ratio
+    out["Likely_Data_Error"] = (ratio < lo) | (ratio > hi)
+    n_flagged = int(out["Likely_Data_Error"].sum())
+    if n_flagged:
+        print(f"  [!] {n_flagged} row(s) flagged as likely data errors "
+              f"(price/m2 outside [{lo:.0f}, {hi:.0f}] TL/m2) and excluded from analysis.")
     return out
