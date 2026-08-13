@@ -45,26 +45,32 @@ The dataset will cover only the current rental houses that are available on the 
 KEREM-ALCI-DSA-210-PROJECT/
 ├── README.md                   # Project overview and documentation
 ├── FINAL_REPORT.md             # Detailed final report and insights
+├── CHANGELOG.md                 # What changed and why, with before/after numbers
 ├── requirements.txt            # Python dependencies
+├── sahibinden_urls.txt         # Seed list of Sahibinden URLs to scrape
 │
-├── main_pipeline.ipynb         # Main entry point (Jupyter Notebook)
-├── test_results.ipynb          # Statistical testing (Jupyter Notebook)
+├── main_pipeline.py             # Main entry point - runs the full workflow
+├── test_results.py              # Statistical hypothesis testing (ANOVA, T-tests, Bonferroni)
 │
-├── scrapers/                   # Web scraping scripts
-│   ├── sahibinden/            
-│   │   └── scraper_sahibinden.ipynb  # Sahibinden scraper (Notebook)
-│   ├── emlakjet/              
-│   └── hepsiemlak/            
+├── scrapers/                   # Web scraping scripts (plain .py, no Jupyter required)
+│   ├── sahibinden/
+│   │   ├── find_sahibinden_urls.py  # Discovers new listing URLs, appends to sahibinden_urls.txt
+│   │   └── scraper_sahibinden.py    # Scrapes each URL in sahibinden_urls.txt
+│   ├── emlakjet/
+│   │   └── scraper_emlakjet.py      # Enriches an existing Emlakjet listing file with coordinates/distances
+│   └── hepsiemlak/
+│       └── scraper_hepsiemlak.py    # Scrapes Hepsiemlak's Kurtkoy rental search results
 │
 ├── data/                       # Data files
 │   ├── raw/                   # Raw scraped data
 │   │   ├── sahibinden/        # Sahibinden raw data
 │   │   ├── emlakjet/          # Emlakjet raw data
 │   │   └── hepsiemlak/        # Hepsiemlak raw data
-│   └── processed/             # Cleaned and merged data
+│   └── outputs/                # Generated analysis outputs (Excel, charts)
 │
 ├── analysis/                   # Analysis scripts and results
-│   ├── ml_analysis.ipynb      # Machine Learning & Deal Finder (Notebook)
+│   ├── data_cleaning.py        # Shared cleaners + multi-file loading - single source of truth
+│   ├── ml_analysis.py          # Machine Learning & Deal Finder
 │   └── ANALYSIS_SUMMARY.md    # Additional summary of findings
 │
 └── visualizations/             # Generated charts and plots
@@ -87,22 +93,41 @@ pip install -r requirements.txt
 
 ### Running the Analysis
 
-The project uses Jupyter Notebooks for analysis. You can run them using:
+Everything is a plain Python script - no Jupyter required. From the project root, with your virtual environment active:
 ```bash
-jupyter notebook
+python main_pipeline.py
 ```
 
-**Key Notebooks:**
+**Key scripts:**
 
-1.  **`main_pipeline.ipynb`**:
+1.  **`main_pipeline.py`**:
     *   Runs the complete workflow.
-    *   Loads data, trains models, finding deals, and generates visualizations.
+    *   Loads data, trains models, finds deals, and generates visualizations.
 
-2.  **`test_results.ipynb`**:
-    *   Performs detailed statistical hypothesis testing (ANOVA, T-tests).
+2.  **`test_results.py`**:
+    *   Performs detailed statistical hypothesis testing (ANOVA, T-tests, Bonferroni-corrected).
 
-3.  **`analysis/ml_analysis.ipynb`**:
+3.  **`analysis/ml_analysis.py`**:
     *   The core Machine Learning logic for price prediction.
+
+### Running the Scrapers
+
+Each scraper is a standalone script and can be run from anywhere (paths are anchored to the project root, not your current directory):
+```bash
+python scrapers/sahibinden/find_sahibinden_urls.py   # discover new listing URLs
+python scrapers/sahibinden/scraper_sahibinden.py      # scrape them (up to 15 per run)
+python scrapers/hepsiemlak/scraper_hepsiemlak.py      # scrape Hepsiemlak search results
+python scrapers/emlakjet/scraper_emlakjet.py          # enrich an existing Emlakjet file with coordinates
+```
+Each opens a visible Chrome/Chromium window while it runs.
+
+**Prerequisites:**
+- A real Chrome browser installed (used by `undetected-chromedriver` for the Sahibinden scripts).
+- Playwright's browser binary, installed once: `playwright install chromium` (used by the Hepsiemlak and Emlakjet scripts).
+- `scraper_sahibinden.py` needs `sahibinden_urls.txt` (project root) populated first - either manually, or by running `find_sahibinden_urls.py`.
+- `scraper_emlakjet.py` only enriches an *existing* listing file with coordinates - it doesn't scrape listings itself. It expects `data/raw/emlakjet/emlakjet_listings.xlsx` to already exist.
+
+See `CHANGELOG.md` items 15-16 for why these scrapers were changed and what to check on your first run.
 
 ## Key Findings
 

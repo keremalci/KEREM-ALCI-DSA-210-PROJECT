@@ -285,6 +285,109 @@ stable estimates, not just a different winner by chance.
 
 ---
 
+## 15. Bug: Emlakjet coordinate scraper never actually found coordinates (`scrapers/emlakjet/scraper_emlakjet.ipynb`)
+
+**Before:** the script fetched each listing page with a plain
+`requests.get(url, headers=...)` and regex-searched the raw HTML response
+for embedded coordinates (`coordinate{lat...,lon...}` or `"lat":...,"lon":...`).
+Emlakjet, like Hepsiemlak, injects its map/coordinate data client-side via
+JavaScript - a plain HTTP GET only ever sees the pre-render HTML, which
+never contains it. This is confirmed by the real data: every row in
+`emlakjet_listings_with_coordinates.xlsx` had `latitude`/`longitude` = NaN
+(19/19), which is also why Emlakjet has never contributed to any of the
+"Distance to Metro/University" analysis in this project (see item 7,
+`FINAL_REPORT.md` section 5, and `ANALYSIS_SUMMARY.md`).
+
+**After:** the script now uses Playwright (`async_playwright`, matching the
+approach already proven in `scraper_hepsiemlak.ipynb`) to actually render
+each listing page - `page.goto(url, wait_until="networkidle")` plus a short
+buffer for late-firing JS - before running the same regex patterns against
+the rendered HTML (`page.content()`), with one extra fallback pattern
+(`"latitude":...,"longitude":...`) added for robustness. It also now
+computes `Distance to Metro/University/Bus Station (km)` from any
+coordinates found, via the same `geopy.distance.geodesic()` + reference
+coordinates already used in the Sahibinden/Hepsiemlak scrapers - so a
+successful run produces output in the same schema as the other two
+sources, closing Emlakjet's long-standing distance-data gap.
+
+**Not yet re-validated against the live site** - this requires a real
+browser hitting Emlakjet from your machine, which I can't do from here.
+Run it and check the "Found coordinates for X/Y listings" summary line; if
+it's still 0, Emlakjet's DOM structure or coordinate format may differ from
+what the regex patterns above assume, and the patterns would need
+adjusting based on what's actually in `page.content()` for a real listing
+(e.g. by printing `content` for one URL and inspecting it).
+
+---
+
+## 16. New: `scrapers/sahibinden/find_sahibinden_urls.ipynb` (URL discovery helper)
+
+**Before:** `scraper_sahibinden.ipynb` only visits URLs already listed in
+`sahibinden_urls.txt` - it has no way to find new listings itself, so
+building that file meant manually browsing Sahibinden and copy-pasting
+each listing's URL one at a time.
+
+**After:** a new companion notebook automates that step. It uses the same
+`undetected-chromedriver` approach as the main scraper (Sahibinden blocks
+plain HTTP requests, so a real browser is needed here too) to open the
+Kurtkoy rental search results page, walk through up to 5 pages of results,
+collect listing URLs (same `/ilan/...` pattern the main scraper already
+filters for), and append any new ones - deduplicated against what's
+already in the file - to `sahibinden_urls.txt`. Capped at 60 new URLs per
+run and paced with the same conservative delays as the main scraper.
+
+**Not yet validated against the live site** - same caveat as item 15. The
+listing-URL detection should be reliable (Sahibinden's `/ilan/` link
+pattern is stable and already relied on elsewhere), but the "next page"
+button detection is a best-effort guess at the current pagination markup;
+if it stops after page 1 every run, the selector in `go_to_next_page()`
+will need a small adjustment based on what's actually on the page.
+
+Workflow is now: run `find_sahibinden_urls.py` first to populate
+`sahibinden_urls.txt`, then run `scraper_sahibinden.py` as before (still
+capped at 15 listings scraped per session - rerun it to work through a
+larger backlog).
+
+---
+
+## 17. All `.ipynb` files converted to plain `.py` scripts
+
+**Before:** every runnable file in the project existed as a Jupyter
+notebook (`.ipynb`), including the three scraper notebooks
+(`scraper_sahibinden.ipynb`, `scraper_hepsiemlak.ipynb`,
+`scraper_emlakjet.ipynb`) and the new `find_sahibinden_urls.ipynb`. The
+analysis scripts (`main_pipeline`, `test_results`, `ml_analysis`) already
+had `.py` versions as the actual source of truth (see items 1-2), with
+`.ipynb` mirrors kept only for convention.
+
+**After:** all `.ipynb` files (and stray `.ipynb_checkpoints/` folders)
+have been removed from the project. Everything is now a plain `.py`
+script, runnable with `python <script>.py` - no Jupyter installation
+needed.
+
+This surfaced one real issue worth knowing about: the scraper notebooks
+used relative paths like `"../../sahibinden_urls.txt"`, which only worked
+because Jupyter automatically sets a notebook's working directory to the
+folder it's opened from. A plain `.py` file has no such guarantee - run it
+from a different folder and a relative path like that silently breaks or
+writes output in the wrong place. Fixed by anchoring every scraper's file
+paths to its own location on disk (`Path(__file__).resolve().parent...`)
+instead of the process's current working directory, so each script now
+works correctly no matter where you run it from. While making this change:
+- `scraper_hepsiemlak.py` now saves directly to `data/raw/hepsiemlak/`
+  (timestamped, so repeat runs don't overwrite each other) instead of
+  wherever it happened to be launched from - previously this needed a
+  manual move into `data/raw/`.
+- `scraper_emlakjet.py` now reads its input from and writes its output to
+  `data/raw/emlakjet/` directly, rather than expecting the input file to
+  be manually copied next to the script first.
+- `scraper_sahibinden.py` and `find_sahibinden_urls.py` now resolve
+  `sahibinden_urls.txt` and the `data/raw/sahibinden/` output directory
+  from the project root correctly regardless of the current working
+  directory.
+
+---
+
 ## What wasn't changed
 
 - The scraping approach (manual, `input()`-driven, conservative delays) is

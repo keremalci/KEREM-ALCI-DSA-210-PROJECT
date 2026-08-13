@@ -122,14 +122,15 @@ for flagging listings worth a second look, still not a precise valuation.
 ### Repository Structure
 ```plaintext
 DSA210Project/
-├── main_pipeline.py / .ipynb   # Single entry point: runs test_results.py then ml_analysis.py
-├── test_results.py / .ipynb    # Hypothesis testing (Bonferroni-corrected)
+├── main_pipeline.py             # Single entry point: runs test_results.py then ml_analysis.py
+├── test_results.py              # Hypothesis testing (Bonferroni-corrected)
+├── sahibinden_urls.txt          # Seed list of Sahibinden URLs to scrape
 ├── analysis/
 │   ├── data_cleaning.py        # Shared cleaners + multi-file loading - single source of truth
-│   ├── ml_analysis.py / .ipynb # ML training, CV, Deal Finder
+│   ├── ml_analysis.py          # ML training, CV, Deal Finder
 │   └── ANALYSIS_SUMMARY.md
 ├── data/                        # raw/, outputs/
-├── scrapers/
+├── scrapers/                    # sahibinden/, emlakjet/, hepsiemlak/ - plain .py, no Jupyter needed
 ├── visualizations/
 ├── CHANGELOG.md                 # What changed and why, with real before/after numbers
 └── FINAL_REPORT.md              # This file

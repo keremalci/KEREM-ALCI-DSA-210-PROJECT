@@ -18,7 +18,4 @@ Thumbs.db
 
 # Project specific
 *.pkl
-analysis/ml_analysis.py
-test_results.py
-main_pipeline.py
-scrapers/sahibinden/scraper_sahibinden.py
+.ipynb_checkpoints/
