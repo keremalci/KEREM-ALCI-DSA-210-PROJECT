@@ -4,10 +4,11 @@ numpy
 openpyxl
 scipy
 
-# Machine Learning & Model Analysis (ml_analysis.py)
+# Machine Learning & Model Analysis (analysis/ml_analysis.py)
 scikit-learn
 matplotlib
 seaborn
+joblib
 
 # Web Scraping (scrapers/)
 requests
